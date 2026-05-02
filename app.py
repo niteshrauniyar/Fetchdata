@@ -1,10 +1,17 @@
-import requests
+import streamlit as st
+import pandas as pd
 import time
+import cloudscraper
 
-session = requests.Session()
+st.set_page_config(page_title="NEPSE Floorsheet Fetcher", layout="wide")
 
-# Step 1: Hit homepage to get cookies
-session.get("https://newweb.nepalstock.com")
+st.title("📊 NEPSE Floorsheet Data Fetcher (Stable Version)")
+
+# Inputs
+page_size = st.number_input("Rows per page", value=500, step=100)
+max_pages = st.number_input("Max pages", value=50, step=5)
+
+fetch = st.button("🚀 Fetch Data")
 
 url = "https://newweb.nepalstock.com/api/nots/nepse-data/floorsheet"
 
@@ -16,36 +23,42 @@ headers = {
     "Referer": "https://newweb.nepalstock.com/floorsheet",
 }
 
-all_data = []
+if fetch:
 
-for page in range(1, 50):
-    payload = {
-        "page": page,
-        "size": 500,
-        "sortBy": "contractId",
-        "sortOrder": "desc"
-    }
+    scraper = cloudscraper.create_scraper()
+    all_data = []
 
-    try:
-        response = session.post(url, json=payload, headers=headers, timeout=10)
+    progress = st.progress(0)
 
-        if response.status_code != 200:
-            print("Blocked at page:", page)
-            break
+    for page in range(1, int(max_pages) + 1):
 
-        data = response.json()
+        payload = {
+            "page": page,
+            "size": int(page_size),
+            "sortBy": "contractId",
+            "sortOrder": "desc"
+        }
 
-        if not data.get("floorsheets"):
-            break
+        try:
+            response = scraper.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=15
+            )
 
-        all_data.extend(data["floorsheets"])
+            if response.status_code != 200:
+                st.warning(f"Blocked or error at page {page}")
+                break
 
-        print(f"Page {page} fetched")
+            data = response.json()
 
-        time.sleep(0.5)  # 🔥 IMPORTANT (avoid blocking)
+            rows = data.get("floorsheets", [])
 
-    except Exception as e:
-        print("Error:", e)
-        break
+            if not rows:
+                st.info("No more data available.")
+                break
 
-print("Total rows:", len(all_data))
+            all_data.extend(rows)
+
+            st.write(f"✔ Page {page} fetched
