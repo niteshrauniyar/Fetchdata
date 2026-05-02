@@ -1,92 +1,69 @@
 import streamlit as st
 import pandas as pd
-import time
-import cloudscraper
 
-st.set_page_config(page_title="NEPSE Floorsheet Pro", layout="wide")
+st.set_page_config(page_title="NEPSE Link Table Combiner", layout="wide")
 
-st.title("📊 NEPSE Floorsheet Pro Tracker")
+st.title("📊 NEPSE Floorsheet Link Combiner")
 
-# Inputs
-page_size = st.number_input("Rows per page", value=500, step=100)
-max_pages = st.number_input("Max pages", value=50, step=5)
+st.write("Paste NEPSE pages (one per line)")
 
-script_filter = st.text_input("🔍 Filter by Script (optional)", "")
+links_input = st.text_area("🔗 Paste Links Here")
 
-fetch = st.button("🚀 Fetch Floorsheet")
+run = st.button("🚀 Extract & Combine")
 
-url = "https://newweb.nepalstock.com/api/nots/nepse-data/floorsheet"
+def extract_table(url):
+    try:
+        # read all tables from page
+        tables = pd.read_html(url)
 
-headers = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Origin": "https://newweb.nepalstock.com",
-    "Referer": "https://newweb.nepalstock.com/floorsheet",
-}
+        # NEPSE floorsheet is usually first table
+        if tables:
+            return tables[0]
+    except Exception as e:
+        st.error(f"Failed: {url} | {e}")
+    return None
 
-if fetch:
 
-    scraper = cloudscraper.create_scraper()
-    all_data = []
+if run:
+
+    if not links_input.strip():
+        st.warning("Please paste at least one link.")
+        st.stop()
+
+    links = [x.strip() for x in links_input.split("\n") if x.strip()]
+
+    all_dfs = []
 
     progress = st.progress(0)
 
-    for page in range(1, int(max_pages) + 1):
+    for i, link in enumerate(links):
 
-        payload = {
-            "page": page,
-            "size": int(page_size),
-            "sortBy": "contractId",
-            "sortOrder": "desc"
-        }
+        st.write(f"📥 Processing: {link}")
 
-        try:
-            response = scraper.post(url, json=payload, headers=headers, timeout=15)
+        df = extract_table(link)
 
-            if response.status_code != 200:
-                st.warning(f"Blocked or error at page {page}")
-                break
+        if df is not None:
+            df["source_link"] = link   # track source page
+            all_dfs.append(df)
 
-            data = response.json()
-            rows = data.get("floorsheets", [])
+        progress.progress((i + 1) / len(links))
 
-            if not rows:
-                break
+    if all_dfs:
 
-            all_data.extend(rows)
+        final_df = pd.concat(all_dfs, ignore_index=True)
 
-            st.write(f"✔ Page {page} fetched | Rows: {len(rows)}")
+        st.success(f"✅ Total Rows Combined: {len(final_df)}")
 
-            progress.progress(page / max_pages)
+        st.dataframe(final_df, use_container_width=True)
 
-            time.sleep(0.3)
-
-        except Exception as e:
-            st.error(f"Error at page {page}: {e}")
-            break
-
-    if all_data:
-
-        df = pd.DataFrame(all_data)
-
-        # 🔥 FILTER FEATURE
-        if script_filter:
-            df = df[df["stockSymbol"].str.contains(script_filter, case=False, na=False)]
-
-        st.success(f"✅ Total Rows: {len(df)}")
-
-        st.dataframe(df, use_container_width=True)
-
-        # CSV DOWNLOAD
-        csv = df.to_csv(index=False).encode("utf-8")
+        csv = final_df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
-            "⬇ Download CSV",
+            "⬇ Download Combined CSV",
             csv,
-            "nepse_floorsheet.csv",
+            "nepse_combined_floorsheet.csv",
             "text/csv"
         )
 
     else:
-        st.warning("No data fetched.")
+        st.error("No tables extracted from links.")
