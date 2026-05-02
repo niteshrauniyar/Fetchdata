@@ -1,69 +1,92 @@
 import streamlit as st
 import pandas as pd
+import requests
 
-st.set_page_config(page_title="NEPSE Link Table Combiner", layout="wide")
+st.set_page_config(page_title="NEPSE Floorsheet Combiner", layout="wide")
 
-st.title("📊 NEPSE Floorsheet Link Combiner")
+st.title("📊 NEPSE Floorsheet Link Combiner (Stable)")
 
-st.write("Paste NEPSE pages (one per line)")
+st.write("Paste NEPSE floorsheet links (one per line)")
 
-links_input = st.text_area("🔗 Paste Links Here")
+links_input = st.text_area("🔗 Links")
 
-run = st.button("🚀 Extract & Combine")
+run = st.button("🚀 Fetch & Combine")
 
-def extract_table(url):
-    try:
-        # read all tables from page
-        tables = pd.read_html(url)
+headers = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Origin": "https://nepalstock.com",
+    "Referer": "https://nepalstock.com/",
+}
 
-        # NEPSE floorsheet is usually first table
-        if tables:
-            return tables[0]
-    except Exception as e:
-        st.error(f"Failed: {url} | {e}")
-    return None
+def fetch_api(page=1, size=500):
+    url = "https://nepalstock.com/api/nots/nepse-data/floorsheet"
 
+    payload = {
+        "page": page,
+        "size": size,
+        "sortBy": "contractId",
+        "sortOrder": "desc"
+    }
+
+    r = requests.post(url, json=payload, headers=headers, timeout=15)
+
+    if r.status_code == 200:
+        return r.json().get("floorsheets", [])
+
+    return []
 
 if run:
 
     if not links_input.strip():
-        st.warning("Please paste at least one link.")
+        st.warning("Paste at least one link")
         st.stop()
 
-    links = [x.strip() for x in links_input.split("\n") if x.strip()]
+    links = [l.strip() for l in links_input.split("\n") if l.strip()]
 
-    all_dfs = []
+    all_data = []
 
     progress = st.progress(0)
 
     for i, link in enumerate(links):
 
-        st.write(f"📥 Processing: {link}")
+        st.write(f"📥 Processing link {i+1}")
 
-        df = extract_table(link)
+        # extract page number from URL
+        try:
+            if "page=" in link:
+                page = int(link.split("page=")[1].split("&")[0])
+            else:
+                page = 1
+        except:
+            page = 1
 
-        if df is not None:
-            df["source_link"] = link   # track source page
-            all_dfs.append(df)
+        data = fetch_api(page=page)
+
+        for d in data:
+            d["source_page"] = page
+
+        all_data.extend(data)
 
         progress.progress((i + 1) / len(links))
 
-    if all_dfs:
+    if all_data:
 
-        final_df = pd.concat(all_dfs, ignore_index=True)
+        df = pd.DataFrame(all_data)
 
-        st.success(f"✅ Total Rows Combined: {len(final_df)}")
+        st.success(f"✅ Total Rows: {len(df)}")
 
-        st.dataframe(final_df, use_container_width=True)
+        st.dataframe(df, use_container_width=True)
 
-        csv = final_df.to_csv(index=False).encode("utf-8")
+        csv = df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
-            "⬇ Download Combined CSV",
+            "⬇ Download CSV",
             csv,
-            "nepse_combined_floorsheet.csv",
+            "nepse_floorsheet.csv",
             "text/csv"
         )
 
     else:
-        st.error("No tables extracted from links.")
+        st.error("No data fetched.")
