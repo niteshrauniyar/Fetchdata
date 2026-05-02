@@ -1,65 +1,51 @@
-import streamlit as st
 import requests
-import pandas as pd
+import time
 
-st.set_page_config(page_title="NEPSE Floorsheet App", layout="wide")
+session = requests.Session()
 
-st.title("📊 NEPSE Floorsheet Auto Fetcher")
+# Step 1: Hit homepage to get cookies
+session.get("https://newweb.nepalstock.com")
 
-# User input
-page_size = st.number_input("Rows per page", value=500, step=100)
-max_pages = st.number_input("Max pages to fetch", value=50, step=10)
+url = "https://newweb.nepalstock.com/api/nots/nepse-data/floorsheet"
 
-if st.button("🚀 Fetch Floorsheet Data"):
+headers = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://newweb.nepalstock.com",
+    "Referer": "https://newweb.nepalstock.com/floorsheet",
+}
 
-    all_data = []
-    progress = st.progress(0)
+all_data = []
 
-    url = "https://newweb.nepalstock.com/api/nots/nepse-data/floorsheet"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Content-Type": "application/json"
+for page in range(1, 50):
+    payload = {
+        "page": page,
+        "size": 500,
+        "sortBy": "contractId",
+        "sortOrder": "desc"
     }
 
-    for page in range(1, max_pages + 1):
-
-        payload = {
-            "page": page,
-            "size": page_size,
-            "sortBy": "contractId",
-            "sortOrder": "desc"
-        }
-
-        response = requests.post(url, json=payload, headers=headers)
+    try:
+        response = session.post(url, json=payload, headers=headers, timeout=10)
 
         if response.status_code != 200:
-            st.error(f"Error at page {page}")
+            print("Blocked at page:", page)
             break
 
         data = response.json()
 
-        if "floorsheets" not in data or len(data["floorsheets"]) == 0:
+        if not data.get("floorsheets"):
             break
 
         all_data.extend(data["floorsheets"])
 
-        progress.progress(page / max_pages)
+        print(f"Page {page} fetched")
 
-    if len(all_data) == 0:
-        st.warning("No data found.")
-    else:
-        df = pd.DataFrame(all_data)
+        time.sleep(0.5)  # 🔥 IMPORTANT (avoid blocking)
 
-        st.success(f"✅ Fetched {len(df)} rows")
+    except Exception as e:
+        print("Error:", e)
+        break
 
-        st.dataframe(df, use_container_width=True)
-
-        csv = df.to_csv(index=False).encode('utf-8')
-
-        st.download_button(
-            "⬇ Download CSV",
-            csv,
-            "floorsheet_data.csv",
-            "text/csv"
-        )
+print("Total rows:", len(all_data))
