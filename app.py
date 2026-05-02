@@ -1,25 +1,33 @@
 import streamlit as st
 import pandas as pd
 import requests
-import urllib3
+import time
 
-# ⚠️ suppress SSL warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+st.set_page_config(page_title="NEPSE Floorsheet Fix", layout="wide")
 
-st.set_page_config(page_title="NEPSE Floorsheet Combiner", layout="wide")
+st.title("📊 NEPSE Floorsheet Combiner (FIXED)")
 
-st.title("📊 NEPSE Floorsheet Link Combiner (Stable Version)")
+links_input = st.text_area("Paste Links")
 
-st.write("Paste NEPSE floorsheet links (one per line)")
+run = st.button("Fetch Data")
 
-links_input = st.text_area("🔗 Paste Links")
+# ---------------- SESSION ----------------
+session = requests.Session()
 
-run = st.button("🚀 Fetch & Combine")
+def init_session():
+    try:
+        session.get(
+            "https://newweb.nepalstock.com",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+    except:
+        pass
 
-# ---------------- API FUNCTION ----------------
-def fetch_floorsheet(page, size=500):
+# ---------------- FETCH FUNCTION ----------------
+def fetch_page(page, size=500):
 
-    url = "https://nepalstock.com/api/nots/nepse-data/floorsheet"
+    url = "https://newweb.nepalstock.com/api/nots/nepse-data/floorsheet"
 
     payload = {
         "page": page,
@@ -30,35 +38,32 @@ def fetch_floorsheet(page, size=500):
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json, text/plain, */*",
+        "Accept": "application/json",
         "Content-Type": "application/json",
-        "Origin": "https://nepalstock.com",
-        "Referer": "https://nepalstock.com/"
+        "Origin": "https://newweb.nepalstock.com",
+        "Referer": "https://newweb.nepalstock.com/floorsheet"
     }
 
     try:
-        r = requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=20,
-            verify=False
-        )
+        r = session.post(url, json=payload, headers=headers, timeout=15)
 
         if r.status_code == 200:
-            return r.json().get("floorsheets", [])
+            data = r.json()
+            return data.get("floorsheets", [])
 
     except Exception as e:
-        st.error(f"Request failed: {e}")
+        st.warning(f"Request error: {e}")
 
     return []
 
-# ---------------- MAIN LOGIC ----------------
+# ---------------- MAIN ----------------
 if run:
 
     if not links_input.strip():
-        st.warning("Please paste at least 1 link")
+        st.warning("Paste links first")
         st.stop()
+
+    init_session()
 
     links = [l.strip() for l in links_input.split("\n") if l.strip()]
 
@@ -68,43 +73,39 @@ if run:
 
     for i, link in enumerate(links):
 
-        st.write(f"📥 Processing: {link}")
+        st.write(f"Processing: {link}")
 
-        # extract page number safely
         try:
-            if "page=" in link:
-                page = int(link.split("page=")[1].split("&")[0])
-            else:
-                page = 1
+            page = int(link.split("page=")[1].split("&")[0])
         except:
             page = 1
 
-        data = fetch_floorsheet(page)
+        data = fetch_page(page)
 
-        for d in data:
-            d["source_page"] = page
-
-        all_data.extend(data)
+        if data:
+            all_data.extend(data)
 
         progress.progress((i + 1) / len(links))
 
-    # ---------------- OUTPUT ----------------
+        time.sleep(0.3)
+
+    # ---------------- RESULT ----------------
     if all_data:
 
         df = pd.DataFrame(all_data)
 
-        st.success(f"✅ Total Rows Combined: {len(df)}")
+        st.success(f"Total Rows: {len(df)}")
 
         st.dataframe(df, use_container_width=True)
 
         csv = df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
-            "⬇ Download CSV",
+            "Download CSV",
             csv,
-            "nepse_floorsheet.csv",
+            "floorsheet.csv",
             "text/csv"
         )
 
     else:
-        st.error("No data fetched from links.")
+        st.error("Still no data → NEPSE is blocking requests from this server.")
